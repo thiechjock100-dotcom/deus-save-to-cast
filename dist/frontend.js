@@ -28,11 +28,40 @@ export function setup(ctx) {
   const drawer = document.createElement('details');
   drawer.className = 'deus-cast-drawer';
   drawer.style.cssText = 'position:fixed;right:12px;bottom:76px;z-index:1500;max-width:min(360px,90vw);max-height:55vh;overflow:auto;background:#282232;color:#eee4f3;padding:8px 12px;border:1px solid #786486;border-radius:9px';
-  drawer.hidden = true;
+  drawer.hidden = false;
   const title = document.createElement('summary');
   title.textContent = 'Cast';
   drawer.append(title);
   document.body.append(drawer);
+  const recover = document.createElement('button');
+  recover.textContent = 'Find New Faces in this chat';
+  const results = document.createElement('div');
+  drawer.append(recover, results);
+  let revision = 0;
+  drawer.addEventListener('toggle', () => {
+    if (!drawer.open) { revision++; results.replaceChildren(); recover.disabled=false; }
+  });
+  recover.onclick = async () => {
+    const current = ++revision;
+    const anchor = ctx.messages.getLatestMessageId?.();
+    recover.disabled = true;
+    results.textContent = 'Looking through earlier replies…';
+    try {
+      const data = await call({type:'history', chatId:chats.get(anchor)});
+      if (current !== revision || !live) return;
+      if (anchor !== ctx.messages.getLatestMessageId?.()) throw Error('The chat changed. Search again.');
+      const unique = new Map();
+      for (const row of data.faces) unique.set(faceName(row.profile).toLowerCase(), row);
+      results.textContent = unique.size ? data.destination+' · '+unique.size+' found' : 'No New Faces tags found in the stored replies for '+data.destination+'.';
+      for (const row of unique.values()) {
+        chats.set(row.messageId, data.chatId);
+        const host = document.createElement('div');
+        results.append(host);
+        add(host,row.messageId,row.profile);
+      }
+    } catch(e) { if(current === revision) results.textContent=e.message; }
+    finally { if(current === revision) recover.disabled=false; }
+  };
   const rows = new Map();
   function faceName(profile) {
     return profile.match(/^(?:Called|Seen as):[ \t]*([^|\n]+)/im)?.[1]?.trim() ||
@@ -107,7 +136,7 @@ export function setup(ctx) {
       rows.set(key,{host,profile});
       add(host,messageId,profile);
     }
-    drawer.hidden = !rows.size;
+    
   }
   let scheduled=false;
   const observer=new MutationObserver(()=>{if(!scheduled){scheduled=true;requestAnimationFrame(()=>{scheduled=false;if(live)scan();});}});

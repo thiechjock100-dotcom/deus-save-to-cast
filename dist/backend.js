@@ -13,6 +13,18 @@ async function handle(p) {
   const char = chat && await spindle.characters.get(chat.character_id);
   if (!char) throw Error("Open a chat with an RPG character card.");
   if (p.characterId && char.id !== p.characterId) throw Error("The active RPG changed. Reopen this card.");
+  if (p.type === "history") {
+    const messages = await spindle.chat.getMessages(chat.id, {light:true, includeExtra:false, ownMetadataOnly:true});
+    const faces = [];
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue;
+      for (const match of msg.content.matchAll(/<(face|extra)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)) {
+        const profile = match[2].trim();
+        if (profile) faces.push({messageId:msg.id,profile});
+      }
+    }
+    return {chatId:chat.id, destination:char.name, faces};
+  }
   const owned = (await collect(opts => books.list(opts))).filter(b => b.metadata?.deusCastOwner === char.id);
   if (owned.length > 1) throw Error("Multiple cast books belong to this card. Resolve the duplicate in World Books.");
   let book = owned[0];
@@ -37,7 +49,7 @@ async function handle(p) {
 }
 let queue = Promise.resolve();
 spindle.onFrontendMessage((p,userId) => {
-  if (!p || !["lookup","save"].includes(p.type) || !p.requestId) return;
+  if (!p || !["lookup","save","history"].includes(p.type) || !p.requestId) return;
   queue = queue.then(async () => {
     try { spindle.sendToFrontend({requestId:p.requestId,result:await handle(p)},userId); }
     catch (e) { spindle.sendToFrontend({requestId:p.requestId,error:String(e.message || e)},userId); }

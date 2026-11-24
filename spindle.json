@@ -1,12 +1,17 @@
 {
   "identifier": "deus_save_to_cast",
-  "name": "DEUS · Save to Cast",
-  "version": "1.0.1",
+  "name": "DEUS \u00b7 Save to Cast",
+  "version": "1.0.2",
   "author": "Thiech's RPG tools",
   "github": "https://github.com/thiechjock100-dotcom/deus-save-to-cast",
   "homepage": "https://docs.lumiverse.chat/backend-api/world-books/",
   "description": "Keep recurring New Faces in a cast book attached to the RPG character card.",
-  "permissions": ["characters", "chats", "world_books"],
+  "permissions": [
+    "characters",
+    "chats",
+    "world_books",
+    "chat_mutation"
+  ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"
 }
