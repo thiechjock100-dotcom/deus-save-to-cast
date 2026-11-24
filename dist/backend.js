@@ -26,6 +26,20 @@ async function handle(p, userId) {
     }
     return {chatId:chat.id, destination:char.name, faces};
   }
+  if (p.type === "remember" || p.type === "decision") {
+    const key = normalize(String(p.identity || ''));
+    if (!key) throw Error("A character name is required.");
+    const path = 'cast-decisions-' + encodeURIComponent(chat.id) + '.json';
+    const records = new Map(await spindle.userStorage.getJson(path,{fallback:[],userId}));
+    if (p.type === "decision" || (!records.has(key) && p.legacyDenied === true)) {
+      const denied = p.type === "decision" ? p.denied : true;
+      if (typeof denied !== 'boolean') throw Error("Invalid cast decision.");
+      records.set(key,denied);
+      await spindle.userStorage.setJson(path,[...records],{userId});
+    }
+    if (p.type === "decision") return {denied:records.get(key)};
+    p = {...p, rememberedDenied:records.get(key) === true};
+  }
   const owned = (await collect(opts => books.list({...opts, userId}))).filter(b => b.metadata?.deusCastOwner === char.id);
   if (owned.length > 1) throw Error("Multiple cast books belong to this card. Resolve the duplicate in World Books.");
   let book = owned[0];
@@ -36,6 +50,7 @@ async function handle(p, userId) {
   if (matches.length > 1) throw Error("Several entries share that name. Use a unique full name.");
   const old = matches[0];
   const state = {characterId: char.id, chatId: chat.id, destination: char.name + " · Cast", old: old ? {id:old.id, content:old.content, keys:old.key} : null};
+  if (p.type === "remember") return {saved:!!old,denied:p.rememberedDenied,chatId:chat.id};
   if (p.type === "lookup") return state;
   if (!p.characterId || !p.content?.trim() || !Array.isArray(p.keys)) throw Error("Review the profile before saving.");
   if (JSON.stringify(state.old) !== JSON.stringify(p.previous)) throw Error("The saved profile changed. Reopen the review.");
@@ -50,7 +65,7 @@ async function handle(p, userId) {
 }
 let queue = Promise.resolve();
 spindle.onFrontendMessage((p,userId) => {
-  if (!p || !["lookup","save","history","scope"].includes(p.type) || !p.requestId) return;
+  if (!p || !["lookup","save","history","scope","remember","decision"].includes(p.type) || !p.requestId) return;
   queue = queue.then(async () => {
     try { spindle.sendToFrontend({requestId:p.requestId,result:await handle(p, userId)},userId); }
     catch (e) { spindle.sendToFrontend({requestId:p.requestId,error:String(e.message || e)},userId); }
