@@ -29,6 +29,17 @@ export function setup(ctx) {
   recover.textContent = 'Find New Faces in this chat';
   const results = document.createElement('div');
   drawer.append(recover, results);
+  // Store one small flag per NPC so independent dismissals never overwrite each other.
+  function denialKey(chatId, label) {
+    return 'deus_save_to_cast:denied:' + JSON.stringify([chatId,label.trim().toLowerCase()]);
+  }
+  function syncDenial(key) {
+    for (const root of document.querySelectorAll('.deus-cast-tools')) {
+      if (root.dataset.denialKey === key) root.dispatchEvent(new Event('cast-denial'));
+    }
+  }
+  function storageChanged(event) { if (event.key?.startsWith('deus_save_to_cast:denied:')) syncDenial(event.key); }
+  window.addEventListener('storage',storageChanged);
   let revision = 0;
   drawer.addEventListener('toggle', () => {
     if (!drawer.open) { revision++; results.replaceChildren(); recover.disabled=false; }
@@ -45,11 +56,24 @@ export function setup(ctx) {
       const unique = new Map();
       for (const row of data.faces) unique.set(faceName(row.profile).toLowerCase(), row);
       results.textContent = unique.size ? data.destination+' · '+unique.size+' found' : 'No New Faces tags found in the stored replies for '+data.destination+'.';
+      const deniedRows=document.createElement('details');
+      const deniedTitle=document.createElement('summary');
+      deniedTitle.textContent='Denied characters';
+      deniedRows.append(deniedTitle);
+      results.append(deniedRows);
+      deniedRows.hidden=true;
       for (const row of unique.values()) {
         chats.set(row.messageId, data.chatId);
         const host = document.createElement('div');
-        results.append(host);
+        const key=denialKey(data.chatId,faceName(row.profile));
+        function place() {
+          const target=localStorage.getItem(key)==='1' ? deniedRows : results;
+          if(host.parentElement!==target) target.append(host);
+          deniedRows.hidden=deniedRows.childElementCount===1;
+        }
+        place();
         add(host,row.messageId,row.profile);
+        host.querySelector('.deus-cast-tools')?.addEventListener('cast-denial',place);
       }
     } catch(e) { if(current === revision) results.textContent=e.message; }
     finally { if(current === revision) recover.disabled=false; }
@@ -75,11 +99,51 @@ export function setup(ctx) {
     }
     const action=node('button',rawProfile ? 'Save to Cast · '+name : 'Save to Cast');
     const status=node('small',''); status.setAttribute('aria-live','polite');
+    const deny=node('button','Deny');
+    const identity=faceName(profile);
+    function refreshDenial() {
+      const denied = localStorage.getItem(root.dataset.denialKey) === '1';
+      action.hidden=denied;
+      deny.textContent=denied ? 'Undo deny' : 'Deny';
+      if (denied) status.textContent=name+' · Denied';
+      else if(status.textContent.endsWith(' · Denied')) status.textContent='';
+    }
+    root.addEventListener('cast-denial',refreshDenial);
+    // A message ID survives reloads and links inline controls back to their chat.
+    const sourceKey='deus_save_to_cast:source:'+messageId;
+    const knownChat=chats.get(messageId) || localStorage.getItem(sourceKey);
+    if(knownChat) {
+      root.dataset.denialKey=denialKey(knownChat,identity);
+      localStorage.setItem(sourceKey,knownChat);
+      refreshDenial();
+    } else {
+      call({type:'scope'}).then(s=>{
+        if (!root.isConnected) return;
+        chats.set(messageId,s.chatId);
+        localStorage.setItem(sourceKey,s.chatId);
+        root.dataset.denialKey=denialKey(s.chatId,identity);
+        refreshDenial();
+      }).catch(e=>{status.textContent=e.message;});
+    }
+    deny.onclick=async()=>{
+      deny.disabled=true;
+      try {
+        if (!root.dataset.denialKey) {
+          const scope=await call({type:'scope',chatId:chats.get(messageId)});
+          root.dataset.denialKey=denialKey(scope.chatId,identity);
+          localStorage.setItem(sourceKey,scope.chatId);
+        }
+        const key=root.dataset.denialKey;
+        if(localStorage.getItem(key)==='1') localStorage.removeItem(key);
+        else localStorage.setItem(key,'1');
+        syncDenial(key);
+      } catch(e){status.textContent=e.message;} finally {deny.disabled=false;}
+    };
     action.onclick=async()=>{
-      action.disabled=true;status.textContent='';
+      action.disabled=true;deny.disabled=true;status.textContent='';
       const request={name,chatId:chats.get(messageId)};
       if (!name || /^new face$/i.test(name)) request.name=window.prompt('Name for this cast entry')?.trim();
-      if (!request.name){action.disabled=false;return;}
+      if (!request.name){action.disabled=deny.disabled=false;return;}
       try {
         const s=await call({...request,type:'lookup'});
         const panel=node('div',''); action.hidden=true;
@@ -94,7 +158,7 @@ export function setup(ctx) {
         const content=field('Profile to keep','textarea',merged);content.rows=9;
         const save=node('button',s.old?'Save update':'Save character',panel);
         const cancel=node('button','Cancel',panel);
-        function close(){panel.remove();action.hidden=false;action.disabled=false;}
+        function close(){panel.remove();action.hidden=false;action.disabled=deny.disabled=false;}
         cancel.onclick=close;
         save.onclick=async()=>{
           save.disabled=cancel.disabled=true;
@@ -103,7 +167,7 @@ export function setup(ctx) {
             status.textContent='Saved to '+s.destination;action.textContent='Update';close();
           } catch(e){status.textContent=e.message;save.disabled=cancel.disabled=false;}
         };
-      } catch(e){status.textContent=e.message;action.disabled=false;}
+      } catch(e){status.textContent=e.message;action.disabled=deny.disabled=false;}
     };
   }
   function scan() {
@@ -114,5 +178,5 @@ export function setup(ctx) {
   let scheduled=false;
   const observer=new MutationObserver(()=>{if(!scheduled){scheduled=true;requestAnimationFrame(()=>{scheduled=false;if(live)scan();});}});
   observer.observe(document.body,{childList:true,subtree:true});scan();
-  return ()=>{live=false;observer.disconnect();drawer.remove();document.querySelectorAll(".dem-new-face__body > .deus-cast-tools").forEach(el=>el.remove());off();style();ctx.dom.cleanup();};
+  return ()=>{live=false;window.removeEventListener('storage',storageChanged);observer.disconnect();drawer.remove();document.querySelectorAll(".dem-new-face__body > .deus-cast-tools").forEach(el=>el.remove());off();style();ctx.dom.cleanup();};
 }

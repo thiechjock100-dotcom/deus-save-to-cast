@@ -10,6 +10,7 @@ async function collect(list) {
 }
 async function handle(p, userId) {
   const chat = p.chatId ? await spindle.chats.get(p.chatId, userId) : await spindle.chats.getActive(userId);
+  if (p.type === "scope" && chat) return {chatId:chat.id};
   const char = chat && await spindle.characters.get(chat.character_id, userId);
   if (!char) throw Error("Open a chat with an RPG character card.");
   if (p.characterId && char.id !== p.characterId) throw Error("The active RPG changed. Reopen this card.");
@@ -49,7 +50,7 @@ async function handle(p, userId) {
 }
 let queue = Promise.resolve();
 spindle.onFrontendMessage((p,userId) => {
-  if (!p || !["lookup","save","history"].includes(p.type) || !p.requestId) return;
+  if (!p || !["lookup","save","history","scope"].includes(p.type) || !p.requestId) return;
   queue = queue.then(async () => {
     try { spindle.sendToFrontend({requestId:p.requestId,result:await handle(p, userId)},userId); }
     catch (e) { spindle.sendToFrontend({requestId:p.requestId,error:String(e.message || e)},userId); }
