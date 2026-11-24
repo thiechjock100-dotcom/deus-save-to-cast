@@ -16,14 +16,6 @@ export function setup(ctx) {
   }
   let live=true;
   const chats = new Map();
-  const faces = new Map();
-  const detach = ["face","extra"].map(tagName=>ctx.messages.registerTagInterceptor({tagName},p=>{
-    if (!p.messageId || !p.chatId || p.isUser || p.isStreaming) return;
-    chats.set(p.messageId,p.chatId);
-    const list=faces.get(p.messageId) || new Set();
-    list.add(p.content.trim()); faces.set(p.messageId,list);
-    requestAnimationFrame(()=>{if(live) scan();});
-  }));
   const style = ctx.dom.addStyle('.deus-cast-tools{display:grid;gap:8px;padding:8px 0;color:inherit}.deus-cast-tools button{cursor:pointer;border:1px solid #8b7499;border-radius:7px;background:#32283d;color:#f3e4fb;padding:6px 12px;justify-self:start}.deus-cast-tools textarea,.deus-cast-tools input{box-sizing:border-box;width:100%;padding:7px;color:inherit;background:transparent;border:1px solid #82738b;border-radius:5px}.deus-cast-tools label{display:grid;gap:3px}.deus-cast-tools pre{white-space:pre-wrap}');
   const drawer = document.createElement('details');
   drawer.className = 'deus-cast-drawer';
@@ -62,11 +54,13 @@ export function setup(ctx) {
     } catch(e) { if(current === revision) results.textContent=e.message; }
     finally { if(current === revision) recover.disabled=false; }
   };
-  const rows = new Map();
+
   function faceName(profile) {
-    return profile.match(/^(?:Called|Seen as):[ \t]*([^|\n]+)/im)?.[1]?.trim() ||
-      profile.match(/^Name:[ \t]*([^|\n]+)/im)?.[1]?.trim() ||
-      profile.split('·')[0].split('\n')[0].trim() || 'New face';
+    for (const field of ['Called','Seen as','Name']) {
+      const value = profile.split(/\r?\n/).find(line=>line.trimStart().toLowerCase().startsWith(field.toLowerCase()+':'))?.split(':').slice(1).join(':').split('|')[0].trim();
+      if (value && !/^(?:[-–—]|none|n\/a)$/i.test(value)) return value;
+    }
+    return profile.split('·')[0].split('\n')[0].trim() || 'New face';
   }
   function add(card,messageId,rawProfile) {
     const body = rawProfile ? card : card.querySelector('.dem-new-face__body');
@@ -113,33 +107,12 @@ export function setup(ctx) {
     };
   }
   function scan() {
-    const wanted = new Map();
-    for (const {messageId, element} of ctx.dom.listMessageElements()) {
-      const cards = element.querySelectorAll('.dem-card.dem-new-face');
-      for (const card of cards) add(card,messageId);
-      if (cards.length) continue;
-      for (const profile of faces.get(messageId) || []) {
-        if (!profile) continue;
-        const key = JSON.stringify([chats.get(messageId), faceName(profile).toLowerCase()]);
-        wanted.set(key, {profile,messageId});
-      }
+    for (const {messageId,element} of ctx.dom.listMessageElements()) {
+      for (const card of element.querySelectorAll('.dem-card.dem-new-face')) add(card,messageId);
     }
-    for (const [key,row] of rows) {
-      if (wanted.get(key)?.profile === row.profile) continue;
-      row.host.remove();
-      rows.delete(key);
-    }
-    for (const [key,{profile,messageId}] of wanted) {
-      if (rows.has(key)) continue;
-      const host = document.createElement('div');
-      drawer.append(host);
-      rows.set(key,{host,profile});
-      add(host,messageId,profile);
-    }
-    
   }
   let scheduled=false;
   const observer=new MutationObserver(()=>{if(!scheduled){scheduled=true;requestAnimationFrame(()=>{scheduled=false;if(live)scan();});}});
   observer.observe(document.body,{childList:true,subtree:true});scan();
-  return ()=>{live=false;observer.disconnect();drawer.remove();document.querySelectorAll(".dem-new-face__body > .deus-cast-tools").forEach(el=>el.remove());off();detach.forEach(fn=>fn());style();ctx.dom.cleanup();};
+  return ()=>{live=false;observer.disconnect();drawer.remove();document.querySelectorAll(".dem-new-face__body > .deus-cast-tools").forEach(el=>el.remove());off();style();ctx.dom.cleanup();};
 }
