@@ -16,10 +16,39 @@ export function setup(ctx) {
   }
   let live=true;
   const chats = new Map();
-  const style = ctx.dom.addStyle('.deus-cast-tools{display:grid;gap:8px;padding:8px 0;color:inherit}.deus-cast-tools button{cursor:pointer;border:1px solid #8b7499;border-radius:7px;background:#32283d;color:#f3e4fb;padding:6px 12px;justify-self:start}.deus-cast-tools textarea,.deus-cast-tools input{box-sizing:border-box;width:100%;padding:7px;color:inherit;background:transparent;border:1px solid #82738b;border-radius:5px}.deus-cast-tools label{display:grid;gap:3px}.deus-cast-tools pre{white-space:pre-wrap}');
+  const style = ctx.dom.addStyle(`
+.deus-cast-drawer{position:fixed;right:14px;bottom:76px;z-index:1500;box-sizing:border-box;max-width:calc(100vw - 24px);max-height:65vh;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#785d84 #221d2b;color:#f0e8f4;background:linear-gradient(155deg,#36293e,#231d2c 52%);border:1px solid #69506f;border-radius:14px;box-shadow:0 12px 38px #100a1980;font:14px/1.45 system-ui}
+.deus-cast-drawer[open]{width:365px;padding-bottom:12px}
+.deus-cast-drawer>summary{display:flex;align-items:center;gap:12px;padding:9px 15px;color:#efcf94;font:600 19px/1.3 Georgia,serif;cursor:pointer;list-style:none}
+.deus-cast-drawer summary::-webkit-details-marker{display:none}
+.deus-cast-drawer>summary::before{content:'✦';font:15px Georgia;color:#d8af75}
+.deus-cast-drawer>summary::after,.cast-group>summary::after{content:'⌄';margin-left:auto;font:16px system-ui;color:#c5aecf}
+.deus-cast-drawer[open]>summary::after,.cast-group[open]>summary::after{transform:rotate(180deg)}
+.deus-cast-drawer[open]>summary{padding:15px 17px;border-bottom:1px solid #59455d}
+.deus-cast-tools{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;padding:7px 0;color:inherit}
+.deus-cast-tools button,.deus-cast-drawer>button{font:600 12px/1.3 system-ui;color:#eddfef;background:#413349;border:1px solid #705978;border-radius:7px;padding:6px 10px;cursor:pointer}
+.deus-cast-tools button:hover,.deus-cast-drawer>button:hover{background:#56425f}
+.deus-cast-tools button:focus-visible,.deus-cast-drawer :focus-visible{outline:2px solid #ebc684;outline-offset:2px}
+.deus-cast-tools button:disabled{opacity:.6;cursor:wait}
+.deus-cast-drawer>button{margin:12px 14px 0}
+.cast-results{padding:8px 14px 0}
+.cast-results:empty{display:none}
+.cast-context{font-size:12px;color:#bfaac8;margin:0 0 9px}
+.cast-section,.cast-group{margin:7px 0 0;padding:0;border-top:1px solid #57435d}
+.cast-section>header,.cast-group>summary{display:flex;align-items:center;gap:8px;padding:9px 2px;color:#e7d5e9;font-weight:600;list-style:none}
+.cast-group>summary{cursor:pointer}.cast-count{font:600 11px system-ui;color:#dbc59f;background:#443647;border-radius:5px;padding:2px 6px}
+.cast-results .deus-cast-tools{display:grid;grid-template-columns:minmax(0,1fr) auto auto;background:#2e2637;border-radius:7px;padding:8px 9px;margin-bottom:4px}
+.cast-name{min-width:0;overflow-wrap:anywhere;font:600 15px/1.3 Georgia,serif;color:#f2e6dd}
+.deus-cast-tools small{flex-basis:100%;grid-column:1/-1;color:#d3bddc}.deus-cast-tools small:empty{display:none}
+.deus-cast-tools .cast-secondary{color:#cdbbd4;background:transparent;border-color:transparent}
+.deus-cast-tools .cast-editor{grid-column:1/-1;flex-basis:100%;min-width:0;padding:10px 0}
+.cast-editor label{display:grid;gap:4px;margin:9px 0;font:12px system-ui;color:#d2bfd8}
+.cast-editor input,.cast-editor textarea{box-sizing:border-box;width:100%;background:#211b28;color:#f0e8f4;border:1px solid #635069;padding:8px;border-radius:6px;font:13px/1.45 system-ui}
+.cast-editor pre{white-space:pre-wrap;overflow-wrap:anywhere}.cast-editor button{margin-right:5px}
+.deus-cast-drawer [hidden],.deus-cast-tools [hidden]{display:none!important}
+`);
   const drawer = document.createElement('details');
   drawer.className = 'deus-cast-drawer';
-  drawer.style.cssText = 'position:fixed;right:12px;bottom:76px;z-index:1500;max-width:min(360px,90vw);max-height:55vh;overflow:auto;background:#282232;color:#eee4f3;padding:8px 12px;border:1px solid #786486;border-radius:9px';
   drawer.hidden = false;
   const title = document.createElement('summary');
   title.textContent = 'Cast';
@@ -28,6 +57,7 @@ export function setup(ctx) {
   const recover = document.createElement('button');
   recover.textContent = 'Find New Faces in this chat';
   const results = document.createElement('div');
+  results.className='cast-results';
   drawer.append(recover, results);
   // Store one small flag per NPC so independent dismissals never overwrite each other.
   function denialKey(chatId, label) {
@@ -48,21 +78,37 @@ export function setup(ctx) {
       if (anchor !== ctx.messages.getLatestMessageId?.()) throw Error('The chat changed. Search again.');
       const unique = new Map();
       for (const row of data.faces) unique.set(faceName(row.profile).toLowerCase(), row);
-      results.textContent = unique.size ? data.destination+' · '+unique.size+' found' : 'No New Faces tags found in the stored replies for '+data.destination+'.';
-      const deniedRows=document.createElement('details');
-      const deniedTitle=document.createElement('summary');
-      deniedTitle.textContent='Denied characters';
-      deniedRows.append(deniedTitle);
-      results.append(deniedRows);
-      deniedRows.hidden=true;
+      results.replaceChildren();
+      const context=document.createElement('p');
+      context.className='cast-context';
+      context.textContent=unique.size ? data.destination : 'No New Faces found in '+data.destination+'.';
+      results.append(context);
+      function group(label,folded) {
+        const el=document.createElement(folded?'details':'section');
+        el.className=folded?'cast-group':'cast-section';
+        const heading=document.createElement(folded?'summary':'header');
+        heading.textContent=label;
+        const count=document.createElement('span');
+        count.className='cast-count';
+        heading.append(count);
+        el.append(heading);
+        results.append(el);
+        el.hidden=true;
+        return {el,count};
+      }
+      const fresh=group('New faces',false), saved=group('Already saved',true), denied=group('Denied',true);
       for (const row of unique.values()) {
         chats.set(row.messageId, data.chatId);
         const host = document.createElement('div');
-        const key=denialKey(data.chatId,faceName(row.profile));
         function place() {
-          const target=host.querySelector('.deus-cast-tools')?.dataset.denied==='true' ? deniedRows : results;
-          if(host.parentElement!==target) target.append(host);
-          deniedRows.hidden=deniedRows.childElementCount===1;
+          const flags=host.querySelector('.deus-cast-tools')?.dataset;
+          const target=flags?.denied==='true' ? denied : flags?.saved==='true' ? saved : fresh;
+          if(host.parentElement!==target.el) target.el.append(host);
+          for(const item of [fresh,saved,denied]){
+            const size=item.el.childElementCount-1;
+            item.el.hidden=size===0;
+            item.count.textContent=String(size);
+          }
         }
         place();
         add(host,row.messageId,row.profile);
@@ -90,19 +136,23 @@ export function setup(ctx) {
     function node(tag,text,parent=root) {
       const el = document.createElement(tag); el.textContent=text; parent.append(el); return el;
     }
-    const action=node('button',rawProfile ? 'Save to Cast · '+name : 'Save to Cast');
+    if(rawProfile) node('span',name).className='cast-name';
+    const action=node('button',rawProfile ? 'Save' : 'Save to Cast');
     const status=node('small',''); status.setAttribute('aria-live','polite');
     const deny=node('button','Deny');
+    deny.className='cast-secondary';
+    root.append(status);
     const identity=faceName(profile);
     let scope;
     let isSaved=false;
     function apply(denied,saved) {
       root.dataset.denied=String(denied);
+      root.dataset.saved=String(saved);
       isSaved=saved;
       action.hidden=denied;
-      action.textContent=saved ? 'Update · '+name : rawProfile ? 'Save to Cast · '+name : 'Save to Cast';
+      action.textContent=saved ? 'Update' : rawProfile ? 'Save' : 'Save to Cast';
       deny.textContent=denied ? 'Undo deny' : 'Deny';
-      status.textContent=denied ? name+' · Denied' : saved ? name+' · Already saved' : '';
+      status.textContent=rawProfile ? '' : denied ? name+' · Denied' : saved ? name+' · Already saved' : '';
       root.dispatchEvent(new Event('cast-denial'));
     }
     const sourceKey='deus_save_to_cast:source:'+messageId;
@@ -141,7 +191,7 @@ export function setup(ctx) {
       if (!request.name){action.disabled=deny.disabled=false;return;}
       try {
         const s=await call({...request,type:'lookup'});
-        const panel=node('div',''); action.hidden=true;
+        const panel=node('div',''); panel.className='cast-editor'; action.hidden=true;
         node('strong',s.destination,panel);
         if(s.old) {node('p','Previously saved',panel);node('pre',s.old.content,panel);}
         function field(title,tag,value) {
